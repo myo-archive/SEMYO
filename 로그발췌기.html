@@ -340,6 +340,15 @@
   }
   .page-text p.continued{ text-indent:0; }
   .page-text p:last-child{ margin-bottom:0; }
+  .page-text mark.hl-mark{
+    background-color: transparent;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+    cursor: pointer;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
 
   .page-footer{
     flex:0 0 auto; height:7mm; z-index:1;
@@ -571,13 +580,21 @@
       </div>
 
       <div class="field">
-        <div class="field-label"><span>하단 표기 제목</span></div>
-        <input class="text-input" id="ctlTitle" type="text" placeholder="선택 사항" maxlength="40" />
+        <div class="field-label"><span>하이라이트</span></div>
+        <div class="color-row">
+          <input type="color" id="ctlHighlightColor" value="#fff176" />
+          <span>강조색</span>
+        </div>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="btn btn-secondary" id="applyHighlightBtn" type="button" disabled>선택 영역 강조</button>
+          <button class="btn btn-secondary" id="clearHighlightBtn" type="button" disabled>전체 지우기</button>
+        </div>
+        <div class="hint" style="margin-top:8px; margin-bottom:0;">페이지에서 문장을 드래그로 선택한 뒤 위 버튼을 누르면 강조돼요. 강조된 부분을 클릭하면 해제됩니다.</div>
       </div>
 
       <div class="field">
-        <div class="field-label"><span>저장 파일명</span></div>
-        <input class="text-input" id="ctlFileName" type="text" placeholder="미입력 시 '로그발췌기'로 저장" maxlength="50" />
+        <div class="field-label"><span>하단 표기 제목</span></div>
+        <input class="text-input" id="ctlTitle" type="text" placeholder="선택 사항" maxlength="40" />
       </div>
 
       <div class="row2">
@@ -594,6 +611,11 @@
       </div>
 
       <div class="hint">빈 줄로 구분된 문단이든 한 줄씩 붙여넣은 문장이든, 줄바꿈을 기준으로 문단을 나눠 페이지에 채웁니다.</div>
+
+      <div class="field" style="margin-bottom:0;">
+        <div class="field-label"><span>저장 파일명</span></div>
+        <input class="text-input" id="ctlSaveName" type="text" placeholder="선택 사항 (기본: 로그발췌기)" maxlength="40" />
+      </div>
     </div>
 
     <div class="panel-actions">
@@ -676,7 +698,6 @@
     paper:"#fdfdfb",
     ink:"#22314a",
     title:"",
-    fileName:"",
     startPage:1,
     divider:true,
     pageSize:"a5",
@@ -685,8 +706,11 @@
     coverOnAllPages:false,
     coverScale:100,
     coverPosX:50,
-    coverPosY:50
+    coverPosY:50,
+    highlights:[], // { paraIndex, start, end, color } — offsets are relative to the raw (trimmed) source paragraph text
+    saveName:""
   };
+  const HIGHLIGHT_ALPHA = 0.55;
 
   let pages = [];
   let coverImgEl = null; // loaded HTMLImageElement for canvas export
@@ -701,6 +725,8 @@
   const buildBtn = $('buildBtn');
   const downloadOneBtn = $('downloadOneBtn');
   const downloadAllBtn = $('downloadAllBtn');
+  const applyHighlightBtn = $('applyHighlightBtn');
+  const clearHighlightBtn = $('clearHighlightBtn');
   const stage = $('stage');
   const placeholder = $('placeholder');
   const pageWrap = $('pageWrap');
@@ -804,12 +830,115 @@
     paras.forEach(p => {
       const pEl = document.createElement('p');
       if (p.continued) pEl.classList.add('continued');
-      pEl.textContent = p.text;
+      pEl.dataset.paraIndex = p.paraIndex;
+      pEl.dataset.chunkStart = p.start;
+      renderParagraphWithHighlights(pEl, p);
       textEl.appendChild(pEl);
     });
     body.appendChild(textEl);
     body.appendChild(buildFooter(pageNumber));
     return page;
+  }
+
+  // ---------- highlights ----------
+  function getHighlightsForChunk(chunk){
+    return state.highlights
+      .filter(h => h.paraIndex === chunk.paraIndex && h.end > chunk.start && h.start < chunk.end)
+      .map(h => ({
+        start: Math.max(0, h.start - chunk.start),
+        end: Math.min(chunk.text.length, h.end - chunk.start),
+        color: h.color,
+        ref: h
+      }))
+      .filter(h => h.end > h.start)
+      .sort((a, b) => a.start - b.start);
+  }
+
+  function renderParagraphWithHighlights(pEl, chunk){
+    pEl.textContent = '';
+    const hls = getHighlightsForChunk(chunk);
+    if (hls.length === 0){
+      pEl.textContent = chunk.text;
+      return;
+    }
+    let cursor = 0;
+    hls.forEach(h => {
+      const start = Math.max(h.start, cursor);
+      const end = h.end;
+      if (start >= end) return;
+      if (start > cursor){
+        pEl.appendChild(document.createTextNode(chunk.text.slice(cursor, start)));
+      }
+      const mark = document.createElement('mark');
+      mark.className = 'hl-mark';
+      mark.style.backgroundColor = hexToRgba(h.color, HIGHLIGHT_ALPHA);
+      mark.title = '클릭하면 강조가 지워져요';
+      mark.textContent = chunk.text.slice(start, end);
+      mark.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeHighlight(h.ref);
+      });
+      pEl.appendChild(mark);
+      cursor = end;
+    });
+    if (cursor < chunk.text.length){
+      pEl.appendChild(document.createTextNode(chunk.text.slice(cursor)));
+    }
+  }
+
+  function removeHighlight(hlObj){
+    const idx = state.highlights.indexOf(hlObj);
+    if (idx === -1) return;
+    state.highlights.splice(idx, 1);
+    if (hasGenerated) renderPage(currentIndex, null);
+  }
+
+  function localOffsetInP(p, node, offset){
+    if (node === p || p.contains(node)){
+      const r = document.createRange();
+      r.selectNodeContents(p);
+      r.setEnd(node, offset);
+      return r.toString().length;
+    }
+    const pos = p.compareDocumentPosition(node);
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 0;
+    return p.textContent.length;
+  }
+
+  function applyHighlightFromSelection(){
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed){
+      showError('먼저 페이지에서 강조할 문장을 드래그해 선택해주세요.');
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const color = $('ctlHighlightColor').value;
+    const ps = pageWrap.querySelectorAll('.page-text p');
+    let applied = false;
+    ps.forEach(p => {
+      if (!range.intersectsNode(p)) return;
+      const full = p.textContent;
+      let localStart = localOffsetInP(p, range.startContainer, range.startOffset);
+      let localEnd = localOffsetInP(p, range.endContainer, range.endOffset);
+      localStart = Math.max(0, Math.min(full.length, localStart));
+      localEnd = Math.max(0, Math.min(full.length, localEnd));
+      if (localEnd <= localStart) return;
+      const paraIndex = parseInt(p.dataset.paraIndex, 10);
+      const chunkStart = parseInt(p.dataset.chunkStart, 10);
+      state.highlights.push({
+        paraIndex,
+        start: chunkStart + localStart,
+        end: chunkStart + localEnd,
+        color
+      });
+      applied = true;
+    });
+    if (applied){
+      sel.removeAllRanges();
+      renderPage(currentIndex, null);
+    } else {
+      showError('선택한 영역을 찾지 못했어요. 다시 선택해주세요.');
+    }
   }
 
   // ---------- capacity measurement ----------
@@ -835,6 +964,9 @@
       return;
     }
 
+    // origParaIndex/offset let highlights (stored against the raw paragraph text)
+    // survive repagination even if page breaks shift.
+
     const capNoCover = measureCapacity(false);
     const capWithCover = state.coverImage ? measureCapacity(true) : capNoCover;
 
@@ -848,7 +980,7 @@
     measurer.style.width = capNoCover.width + 'px';
     document.body.appendChild(measurer);
 
-    const queue = rawParas.map(t => ({ text: t, continued: false }));
+    const queue = rawParas.map((t, i) => ({ text: t, continued: false, paraIndex: i, offset: 0 }));
     const result = [];
     let current = [];
 
@@ -884,7 +1016,13 @@
       const para = queue.shift();
 
       if (fitsWhole(para)){
-        current.push(para);
+        current.push({
+          text: para.text,
+          continued: para.continued,
+          paraIndex: para.paraIndex,
+          start: para.offset,
+          end: para.offset + para.text.length
+        });
         continue;
       }
 
@@ -917,13 +1055,24 @@
       p.textContent = fittedText;
       measurer.appendChild(p);
 
-      current.push({ text: fittedText, continued: para.continued });
+      current.push({
+        text: fittedText,
+        continued: para.continued,
+        paraIndex: para.paraIndex,
+        start: para.offset,
+        end: para.offset + fittedText.length
+      });
       result.push(current);
       current = [];
       measurer.innerHTML = '';
 
       if (remaining.trim().length > 0){
-        queue.unshift({ text: remaining, continued: true });
+        queue.unshift({
+          text: remaining,
+          continued: true,
+          paraIndex: para.paraIndex,
+          offset: para.offset + fittedText.length + 1
+        });
       }
     }
 
@@ -970,6 +1119,8 @@
     navEl.style.display = 'flex';
     downloadOneBtn.disabled = false;
     downloadAllBtn.disabled = false;
+    applyHighlightBtn.disabled = false;
+    clearHighlightBtn.disabled = false;
     fitStage();
     renderPage(currentIndex, null);
   }
@@ -981,6 +1132,7 @@
     renderPage(currentIndex, delta);
   }
 
+  let lastBuiltText = null;
   function runBuild(){
     state.text = sourceText.value;
     if (!state.text.trim()){
@@ -988,6 +1140,10 @@
       sourceText.focus();
       setTimeout(() => sourceText.classList.remove('warn'), 900);
       return;
+    }
+    if (state.text !== lastBuiltText){
+      state.highlights = [];
+      lastBuiltText = state.text;
     }
     buildBtn.textContent = '만드는 중…';
     buildBtn.disabled = true;
@@ -1101,6 +1257,90 @@
     return lines;
   }
 
+  function wrapWordsWithOffsets(ctx, text, maxWidth, firstLineIndent){
+    // Same wrapping logic as wrapWords, but each returned line also carries
+    // its [start,end) character offset within `text`, so highlight ranges
+    // (tracked in chunk-local character offsets) can be mapped onto lines.
+    const wordMatches = [];
+    let idx = 0;
+    text.split(' ').forEach(w => {
+      const start = idx;
+      idx += w.length;
+      wordMatches.push({ word: w, start, end: idx });
+      idx += 1; // account for the separating space
+    });
+
+    const lines = [];
+    let line = '';
+    let lineStart = 0;
+    let isFirst = true;
+    wordMatches.forEach(wm => {
+      const test = line ? (line + ' ' + wm.word) : wm.word;
+      const avail = maxWidth - (isFirst ? firstLineIndent : 0);
+      if (ctx.measureText(test).width > avail && line){
+        lines.push({ text: line, start: lineStart, end: lineStart + line.length });
+        line = wm.word;
+        lineStart = wm.start;
+        isFirst = false;
+      } else {
+        if (line === '') lineStart = wm.start;
+        line = test;
+      }
+    });
+    if (line || lines.length === 0) lines.push({ text: line, start: lineStart, end: lineStart + line.length });
+    return lines;
+  }
+
+  function computeLineLayout(ctx, lineText, align, lx, lw, isLast){
+    // Mirrors the x-positioning math used when the line is actually drawn
+    // (left / center / right / justify), so highlight rects line up with the text.
+    const words = lineText.split(' ');
+    const spaceWidth = ctx.measureText(' ').width;
+    const wordWidths = words.map(w => ctx.measureText(w).width);
+    const totalWordsWidth = wordWidths.reduce((a, b) => a + b, 0);
+    let gap = spaceWidth;
+    let startX;
+    if (align === 'justify' && !isLast && words.length > 1){
+      gap = Math.max(0, (lw - totalWordsWidth) / (words.length - 1));
+      startX = lx;
+    } else if (align === 'center'){
+      const totalWidth = totalWordsWidth + spaceWidth * (words.length - 1);
+      startX = lx + (lw - totalWidth) / 2;
+    } else if (align === 'right'){
+      const totalWidth = totalWordsWidth + spaceWidth * (words.length - 1);
+      startX = lx + lw - totalWidth;
+    } else {
+      startX = lx;
+    }
+    const boxes = [];
+    let cx = startX;
+    let charOffset = 0;
+    words.forEach((w, i) => {
+      boxes.push({ text: w, start: charOffset, end: charOffset + w.length, x: cx, width: wordWidths[i] });
+      cx += wordWidths[i] + gap;
+      charOffset += w.length + 1;
+    });
+    return boxes;
+  }
+
+  function highlightPixelRange(ctx, boxes, hlStart, hlEnd){
+    let x1 = null, x2 = null;
+    boxes.forEach(b => {
+      const s = Math.max(hlStart, b.start);
+      const e = Math.min(hlEnd, b.end);
+      if (s >= e) return;
+      const localS = s - b.start;
+      const localE = e - b.start;
+      const prefixW = localS > 0 ? ctx.measureText(b.text.slice(0, localS)).width : 0;
+      const partialW = ctx.measureText(b.text.slice(localS, localE)).width;
+      const bx1 = b.x + prefixW;
+      const bx2 = bx1 + partialW;
+      if (x1 === null || bx1 < x1) x1 = bx1;
+      if (x2 === null || bx2 > x2) x2 = bx2;
+    });
+    return x1 === null ? null : { x1, x2 };
+  }
+
   function drawJustifiedLine(ctx, text, x, y, width){
     const words = text.split(' ');
     if (words.length <= 1){
@@ -1130,6 +1370,8 @@
     } else {
       baseW = iw; baseH = iw / boxRatio;
     }
+    // same math as the live preview's object-position + transform-origin/scale combo,
+    // so the exported image matches what's shown on screen
     const s = Math.max(1, (scalePct == null ? 100 : scalePct) / 100);
     const px = (posXPct == null ? 50 : posXPct) / 100;
     const py = (posYPct == null ? 50 : posYPct) / 100;
@@ -1201,23 +1443,39 @@
     let y = contentTop + fontSizePx * 0.85;
     paras.forEach(para => {
       const indent = para.continued ? 0 : indentPx;
-      const lines = wrapWords(ctx, para.text, contentW, indent);
+      const lines = wrapWordsWithOffsets(ctx, para.text, contentW, indent);
+      const paraHighlights = getHighlightsForChunk(para);
       lines.forEach((line, li) => {
         const lineIndent = li === 0 ? indent : 0;
         const lx = contentX + lineIndent;
         const lw = contentW - lineIndent;
         const isLast = li === lines.length - 1;
+
+        if (paraHighlights.length){
+          const boxes = computeLineLayout(ctx, line.text, state.align, lx, lw, isLast);
+          paraHighlights.forEach(h => {
+            const clampedStart = Math.max(0, h.start - line.start);
+            const clampedEnd = Math.min(line.text.length, h.end - line.start);
+            if (clampedStart >= clampedEnd) return;
+            const range = highlightPixelRange(ctx, boxes, clampedStart, clampedEnd);
+            if (!range) return;
+            ctx.fillStyle = hexToRgba(h.color, HIGHLIGHT_ALPHA);
+            ctx.fillRect(range.x1 - 1 * s, y - fontSizePx * 0.82, (range.x2 - range.x1) + 2 * s, lineHeightPx * 0.92);
+          });
+          ctx.fillStyle = state.ink;
+        }
+
         if (state.align === 'center'){
           ctx.textAlign = 'center';
-          ctx.fillText(line, lx + lw / 2, y);
+          ctx.fillText(line.text, lx + lw / 2, y);
         } else if (state.align === 'right'){
           ctx.textAlign = 'right';
-          ctx.fillText(line, lx + lw, y);
+          ctx.fillText(line.text, lx + lw, y);
         } else if (state.align === 'justify' && !isLast){
-          drawJustifiedLine(ctx, line, lx, y, lw);
+          drawJustifiedLine(ctx, line.text, lx, y, lw);
         } else {
           ctx.textAlign = 'left';
-          ctx.fillText(line, lx, y);
+          ctx.fillText(line.text, lx, y);
         }
         y += lineHeightPx;
       });
@@ -1381,6 +1639,13 @@
     }, 4200);
   }
 
+  function sanitizeFileName(name){
+    return (name || '').replace(/[\\/:*?"<>|]+/g, '').trim();
+  }
+  function currentBaseName(){
+    return sanitizeFileName(state.saveName) || '로그발췌기';
+  }
+
   function offerBlob(blob, filename, isImage){
     const url = URL.createObjectURL(blob);
     try{
@@ -1393,13 +1658,6 @@
     showSaveModal(url, filename, isImage);
   }
 
-  // 저장할 파일명을 정제하여 반환하는 헬퍼 함수
-  function getExportFileName() {
-    const customName = (state.fileName || '').trim();
-    const sanitized = customName.replace(/[\\/:*?"<>|]/g, '');
-    return sanitized.length > 0 ? sanitized : '로그발췌기';
-  }
-
   async function downloadCurrent(){
     overlayText.textContent = '이미지 생성 중…';
     overlay.classList.add('show');
@@ -1408,10 +1666,8 @@
       await ensureCoverLoaded();
       const canvas = renderPageToCanvas(currentIndex);
       const blob = await canvasToBlob(canvas);
-      
-      const baseName = getExportFileName();
-      const fileName = `${baseName}_${String(currentIndex + 1).padStart(2,'0')}.png`;
-      offerBlob(blob, fileName, true);
+      const base = currentBaseName();
+      offerBlob(blob, base + '_' + String(currentIndex + 1).padStart(2,'0') + '.png', true);
     } catch(err){
       showError('이미지를 만들지 못했어요: ' + (err && err.message ? err.message : err));
     } finally {
@@ -1424,22 +1680,19 @@
     try{
       await ensureFonts();
       await ensureCoverLoaded();
+      const base = currentBaseName();
       const files = [];
-      const baseName = getExportFileName();
-
       for (let i = 0; i < pages.length; i++){
         overlayText.textContent = '이미지 생성 중… (' + (i + 1) + ' / ' + pages.length + ')';
         const canvas = renderPageToCanvas(i);
         const blob = await canvasToBlob(canvas);
         const buf = await blob.arrayBuffer();
-        
-        const fileName = `${baseName}_${String(i + 1).padStart(2,'0')}.png`;
-        files.push({ name: fileName, data: new Uint8Array(buf) });
+        files.push({ name: base + '_' + String(i + 1).padStart(2,'0') + '.png', data: new Uint8Array(buf) });
         await new Promise(r => setTimeout(r, 0));
       }
       overlayText.textContent = '압축하는 중…';
       const zipBlob = buildZip(files);
-      offerBlob(zipBlob, `${baseName}.zip`, false);
+      offerBlob(zipBlob, base + '.zip', false);
     } catch(err){
       showError('전체 저장에 실패했어요: ' + (err && err.message ? err.message : err));
     } finally {
@@ -1580,12 +1833,19 @@
   $('ctlPaper').addEventListener('input', e => { state.paper = e.target.value; rerenderCosmetic(); });
   $('ctlInk').addEventListener('input', e => { state.ink = e.target.value; rerenderCosmetic(); });
   $('ctlTitle').addEventListener('input', e => { state.title = e.target.value; rerenderCosmetic(); });
-  $('ctlFileName').addEventListener('input', e => { state.fileName = e.target.value; });
   $('ctlStartPage').addEventListener('input', e => {
     state.startPage = Math.max(1, parseInt(e.target.value || '1', 10));
     rerenderCosmetic();
   });
   $('ctlDivider').addEventListener('change', e => { state.divider = e.target.checked; rerenderCosmetic(); });
+  $('ctlSaveName').addEventListener('input', e => { state.saveName = e.target.value; });
+
+  applyHighlightBtn.addEventListener('click', applyHighlightFromSelection);
+  clearHighlightBtn.addEventListener('click', () => {
+    if (!state.highlights.length) return;
+    state.highlights = [];
+    if (hasGenerated) renderPage(currentIndex, null);
+  });
 
   buildBtn.addEventListener('click', runBuild);
   prevBtn.addEventListener('click', () => navigate(-1));
