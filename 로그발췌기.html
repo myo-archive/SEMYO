@@ -575,6 +575,11 @@
         <input class="text-input" id="ctlTitle" type="text" placeholder="선택 사항" maxlength="40" />
       </div>
 
+      <div class="field">
+        <div class="field-label"><span>저장 파일명</span></div>
+        <input class="text-input" id="ctlFileName" type="text" placeholder="미입력 시 '로그발췌기'로 저장" maxlength="50" />
+      </div>
+
       <div class="row2">
         <div class="field">
           <div class="field-label"><span>시작 쪽수</span></div>
@@ -671,6 +676,7 @@
     paper:"#fdfdfb",
     ink:"#22314a",
     title:"",
+    fileName:"",
     startPage:1,
     divider:true,
     pageSize:"a5",
@@ -1124,8 +1130,6 @@
     } else {
       baseW = iw; baseH = iw / boxRatio;
     }
-    // same math as the live preview's object-position + transform-origin/scale combo,
-    // so the exported image matches what's shown on screen
     const s = Math.max(1, (scalePct == null ? 100 : scalePct) / 100);
     const px = (posXPct == null ? 50 : posXPct) / 100;
     const py = (posYPct == null ? 50 : posYPct) / 100;
@@ -1389,6 +1393,13 @@
     showSaveModal(url, filename, isImage);
   }
 
+  // 저장할 파일명을 정제하여 반환하는 헬퍼 함수
+  function getExportFileName() {
+    const customName = (state.fileName || '').trim();
+    const sanitized = customName.replace(/[\\/:*?"<>|]/g, '');
+    return sanitized.length > 0 ? sanitized : '로그발췌기';
+  }
+
   async function downloadCurrent(){
     overlayText.textContent = '이미지 생성 중…';
     overlay.classList.add('show');
@@ -1397,7 +1408,10 @@
       await ensureCoverLoaded();
       const canvas = renderPageToCanvas(currentIndex);
       const blob = await canvasToBlob(canvas);
-      offerBlob(blob, '로그발췌기_' + String(currentIndex + 1).padStart(2,'0') + '.png', true);
+      
+      const baseName = getExportFileName();
+      const fileName = `${baseName}_${String(currentIndex + 1).padStart(2,'0')}.png`;
+      offerBlob(blob, fileName, true);
     } catch(err){
       showError('이미지를 만들지 못했어요: ' + (err && err.message ? err.message : err));
     } finally {
@@ -1411,17 +1425,21 @@
       await ensureFonts();
       await ensureCoverLoaded();
       const files = [];
+      const baseName = getExportFileName();
+
       for (let i = 0; i < pages.length; i++){
         overlayText.textContent = '이미지 생성 중… (' + (i + 1) + ' / ' + pages.length + ')';
         const canvas = renderPageToCanvas(i);
         const blob = await canvasToBlob(canvas);
         const buf = await blob.arrayBuffer();
-        files.push({ name: '로그발췌기_' + String(i + 1).padStart(2,'0') + '.png', data: new Uint8Array(buf) });
+        
+        const fileName = `${baseName}_${String(i + 1).padStart(2,'0')}.png`;
+        files.push({ name: fileName, data: new Uint8Array(buf) });
         await new Promise(r => setTimeout(r, 0));
       }
       overlayText.textContent = '압축하는 중…';
       const zipBlob = buildZip(files);
-      offerBlob(zipBlob, '로그발췌기.zip', false);
+      offerBlob(zipBlob, `${baseName}.zip`, false);
     } catch(err){
       showError('전체 저장에 실패했어요: ' + (err && err.message ? err.message : err));
     } finally {
@@ -1562,6 +1580,7 @@
   $('ctlPaper').addEventListener('input', e => { state.paper = e.target.value; rerenderCosmetic(); });
   $('ctlInk').addEventListener('input', e => { state.ink = e.target.value; rerenderCosmetic(); });
   $('ctlTitle').addEventListener('input', e => { state.title = e.target.value; rerenderCosmetic(); });
+  $('ctlFileName').addEventListener('input', e => { state.fileName = e.target.value; });
   $('ctlStartPage').addEventListener('input', e => {
     state.startPage = Math.max(1, parseInt(e.target.value || '1', 10));
     rerenderCosmetic();
