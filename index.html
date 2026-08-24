@@ -231,6 +231,20 @@
   }
   .sample-link:hover{ color:var(--gold); }
 
+  .text-stats{
+    font-size:11px; color:#8b96a8; line-height:1.5; margin-top:8px;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .hl-palette{ display:flex; flex-wrap:wrap; gap:8px; min-height:26px; align-items:center; }
+  .hl-swatch{
+    width:24px; height:24px; border-radius:50%; padding:0;
+    border:2px solid var(--bg-panel); box-shadow:0 0 0 1px var(--line);
+    cursor:pointer;
+  }
+  .hl-swatch.active{ box-shadow:0 0 0 2px var(--gold); }
+  .hl-palette .empty-hint{ font-size:11px; color:#8b96a8; line-height:1.5; }
+
   .panel-actions{
     position:sticky; bottom:0;
     background:linear-gradient(to top, var(--bg-panel) 70%, transparent);
@@ -479,6 +493,7 @@
         <div style="margin-top:6px;">
           <button class="sample-link" id="sampleBtn" type="button">예시 문장 넣어보기</button>
         </div>
+        <div class="text-stats" id="textStats">0자 (공백 제외 0자) · 0문단 · 예상 0페이지</div>
       </div>
 
       <div class="field">
@@ -593,6 +608,10 @@
           <input type="color" id="ctlHighlightColor" value="#fff176" />
           <span>강조색</span>
         </div>
+
+        <div class="hl-palette" id="hlPalette" style="margin-top:10px;"></div>
+        <button class="btn btn-secondary" id="hlPaletteAddBtn" type="button" style="width:100%; margin-top:8px;">현재 색 팔레트에 추가</button>
+
         <div class="btn-row" style="margin-top:10px;">
           <button class="btn btn-secondary" id="applyHighlightBtn" type="button" disabled>선택 영역 강조</button>
           <button class="btn btn-secondary" id="clearHighlightBtn" type="button" disabled>전체 지우기</button>
@@ -624,6 +643,22 @@
         <div class="field-label"><span>저장 파일명</span></div>
         <input class="text-input" id="ctlSaveName" type="text" placeholder="선택 사항 (기본: 로그발췌기)" maxlength="40" />
       </div>
+
+      <details class="adv" style="margin-top:18px;">
+        <summary>프로필 (스타일 저장/불러오기)</summary>
+        <div class="adv-body">
+          <select class="styled" id="ctlProfileSelect">
+            <option value="">저장된 프로필 없음</option>
+          </select>
+          <div class="btn-row" style="margin-top:8px;">
+            <button class="btn btn-secondary" id="profileLoadBtn" type="button" disabled>불러오기</button>
+            <button class="btn btn-secondary" id="profileDeleteBtn" type="button" disabled>삭제</button>
+          </div>
+          <input class="text-input" id="ctlProfileName" type="text" placeholder="새 프로필 이름 (예: 겨울 단편용)" maxlength="30" style="margin-top:10px;" />
+          <button class="btn btn-secondary" id="profileSaveBtn" type="button" style="width:100%; margin-top:8px;">현재 설정 저장</button>
+          <div class="hint" style="margin-top:8px; margin-bottom:0;">폰트·색상·간격 같은 스타일을 이름 붙여 저장해두고, 작품마다 바꿔가며 불러올 수 있어요. (원문 내용과 표지 사진은 저장되지 않아요.)</div>
+        </div>
+      </details>
     </div>
 
     <div class="panel-actions">
@@ -722,6 +757,42 @@
     saveName:""
   };
   const HIGHLIGHT_ALPHA = 0.55;
+
+  // ---------- local persistence (profiles / highlight palette) ----------
+  // Falls back to in-memory only (no error thrown, no crash) if localStorage
+  // is unavailable in the current environment — saved data just won't
+  // survive a reload in that case.
+  let storageWarned = false;
+  function safeStorageGet(key, fallback){
+    try{
+      const raw = window.localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    }catch(e){ return fallback; }
+  }
+  function safeStorageSet(key, value){
+    try{
+      window.localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    }catch(e){
+      if (!storageWarned){
+        storageWarned = true;
+        showError('이 화면에서는 저장 공간을 쓸 수 없어서, 지금 세션에서만 유지돼요.');
+      }
+      return false;
+    }
+  }
+
+  const PROFILES_KEY = 'logExcerpt_stylePresets_v1';
+  const PALETTE_KEY = 'logExcerpt_hlPalette_v1';
+  const DEFAULT_PALETTE = ['#fff176', '#ffab91', '#a5d6a7', '#90caf9', '#ce93d8'];
+  const PROFILE_FIELDS = [
+    'font','fontSize','align','lineHeight','letterSpacing','paraSpace','indent',
+    'padding','paper','ink','pageSize','divider','title',
+    'coverHeightPct','coverScale','coverPosX','coverPosY','coverOnAllPages'
+  ];
+
+  let profiles = safeStorageGet(PROFILES_KEY, {});
+  let hlPalette = safeStorageGet(PALETTE_KEY, DEFAULT_PALETTE.slice());
 
   let pages = [];
   let coverImgEl = null; // loaded HTMLImageElement for canvas export
@@ -1162,6 +1233,7 @@
     buildBtn.disabled = true;
     setTimeout(() => {
       paginate();
+      updatePageEstimate();
       currentIndex = 0;
       showGenerated();
       buildBtn.textContent = '페이지 만들기';
@@ -1170,13 +1242,15 @@
   }
 
   function scheduleRepaginate(){
-    if (!hasGenerated) return;
     clearTimeout(repagTimer);
     repagTimer = setTimeout(() => {
       const keepIndex = Math.min(currentIndex, 999999);
       paginate();
-      currentIndex = Math.min(keepIndex, pages.length - 1);
-      renderPage(currentIndex, null);
+      updatePageEstimate();
+      if (hasGenerated){
+        currentIndex = Math.min(keepIndex, pages.length - 1);
+        renderPage(currentIndex, null);
+      }
     }, 220);
   }
 
@@ -1679,7 +1753,185 @@
     }
   }
 
+  // ---------- text stats ----------
+  const textStatsEl = $('textStats');
+  let lastCharCount = 0, lastNoSpaceCount = 0, lastParaCount = 0, lastPageEstimate = 0;
+
+  function renderStats(){
+    textStatsEl.textContent =
+      lastCharCount.toLocaleString('ko-KR') + '자 (공백 제외 ' + lastNoSpaceCount.toLocaleString('ko-KR') + '자) · ' +
+      lastParaCount + '문단 · 예상 ' + lastPageEstimate + '페이지';
+  }
+  function updateCharStats(){
+    const text = sourceText.value;
+    lastCharCount = text.length;
+    lastNoSpaceCount = text.replace(/\s/g, '').length;
+    lastParaCount = text.split(/\n+/).map(s => s.trim()).filter(Boolean).length;
+    renderStats();
+  }
+  function updatePageEstimate(){
+    lastPageEstimate = state.text.trim() ? Math.max(pages.length, 1) : 0;
+    renderStats();
+  }
+
+  // ---------- style profiles (save/load) ----------
+  const profileSelect = $('ctlProfileSelect');
+  const profileLoadBtn = $('profileLoadBtn');
+  const profileDeleteBtn = $('profileDeleteBtn');
+  const profileNameInput = $('ctlProfileName');
+  const profileSaveBtn = $('profileSaveBtn');
+
+  function currentProfileSnapshot(){
+    const snap = {};
+    PROFILE_FIELDS.forEach(k => { snap[k] = state[k]; });
+    snap.highlightColor = $('ctlHighlightColor').value;
+    return snap;
+  }
+
+  function applyProfileSnapshot(snap){
+    PROFILE_FIELDS.forEach(k => {
+      if (snap[k] !== undefined) state[k] = snap[k];
+    });
+
+    $('ctlFont').value = state.font;
+    [...$('ctlAlign').children].forEach(b => b.classList.toggle('active', b.dataset.v === state.align));
+    [...$('ctlPageSize').children].forEach(b => b.classList.toggle('active', b.dataset.v === state.pageSize));
+
+    $('ctlFontSize').value = state.fontSize; $('valFontSize').textContent = state.fontSize + 'pt';
+    $('ctlLineHeight').value = state.lineHeight; $('valLineHeight').textContent = state.lineHeight.toFixed(1) + '배';
+    $('ctlLetterSpacing').value = state.letterSpacing; $('valLetterSpacing').textContent = state.letterSpacing.toFixed(1) + 'px';
+    $('ctlParaSpace').value = state.paraSpace; $('valParaSpace').textContent = state.paraSpace + 'pt';
+    $('ctlIndent').value = state.indent; $('valIndent').textContent = state.indent + 'pt';
+    $('ctlPadding').value = state.padding; $('valPadding').textContent = state.padding + 'mm';
+    $('ctlPaper').value = state.paper;
+    $('ctlInk').value = state.ink;
+    $('ctlTitle').value = state.title;
+    $('ctlDivider').checked = state.divider;
+    $('ctlCoverHeight').value = state.coverHeightPct; $('valCoverHeight').textContent = state.coverHeightPct + '%';
+    $('ctlCoverScale').value = state.coverScale; $('valCoverScale').textContent = state.coverScale + '%';
+    $('ctlCoverPosX').value = state.coverPosX; $('valCoverPosX').textContent = state.coverPosX + '%';
+    $('ctlCoverPosY').value = state.coverPosY; $('valCoverPosY').textContent = state.coverPosY + '%';
+    $('ctlCoverAllPages').checked = state.coverOnAllPages;
+    if (snap.highlightColor){
+      $('ctlHighlightColor').value = snap.highlightColor;
+      renderPalette();
+    }
+
+    if (hasGenerated) fitStage();
+    scheduleRepaginate();
+    rerenderCosmetic();
+  }
+
+  function refreshProfileSelect(selectName){
+    const names = Object.keys(profiles).sort((a, b) => a.localeCompare(b, 'ko'));
+    profileSelect.innerHTML = '';
+    if (names.length === 0){
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = '저장된 프로필 없음';
+      profileSelect.appendChild(opt);
+      profileLoadBtn.disabled = true;
+      profileDeleteBtn.disabled = true;
+      return;
+    }
+    names.forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n; opt.textContent = n;
+      profileSelect.appendChild(opt);
+    });
+    profileLoadBtn.disabled = false;
+    profileDeleteBtn.disabled = false;
+    if (selectName && names.includes(selectName)) profileSelect.value = selectName;
+  }
+
+  profileSaveBtn.addEventListener('click', () => {
+    const name = (profileNameInput.value || '').trim();
+    if (!name){
+      showError('프로필 이름을 입력해주세요.');
+      return;
+    }
+    const isNew = !profiles[name];
+    profiles[name] = currentProfileSnapshot();
+    safeStorageSet(PROFILES_KEY, profiles);
+    refreshProfileSelect(name);
+    profileNameInput.value = '';
+    showSuccess((isNew ? '"' + name + '" 프로필을 저장했어요.' : '"' + name + '" 프로필을 덮어썼어요.'));
+  });
+
+  profileLoadBtn.addEventListener('click', () => {
+    const name = profileSelect.value;
+    if (!name || !profiles[name]) return;
+    applyProfileSnapshot(profiles[name]);
+    showSuccess('"' + name + '" 프로필을 불러왔어요.');
+  });
+
+  profileDeleteBtn.addEventListener('click', () => {
+    const name = profileSelect.value;
+    if (!name || !profiles[name]) return;
+    if (!window.confirm('"' + name + '" 프로필을 삭제할까요?')) return;
+    delete profiles[name];
+    safeStorageSet(PROFILES_KEY, profiles);
+    refreshProfileSelect();
+    showSuccess('삭제했어요.');
+  });
+
+  // ---------- highlight color palette ----------
+  const hlPaletteEl = $('hlPalette');
+
+  function renderPalette(){
+    hlPaletteEl.innerHTML = '';
+    if (hlPalette.length === 0){
+      const hint = document.createElement('span');
+      hint.className = 'empty-hint';
+      hint.textContent = '저장된 색이 없어요. 아래 버튼으로 추가해보세요.';
+      hlPaletteEl.appendChild(hint);
+      return;
+    }
+    const current = ($('ctlHighlightColor').value || '').toLowerCase();
+    hlPalette.forEach(color => {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'hl-swatch' + (color.toLowerCase() === current ? ' active' : '');
+      sw.style.background = color;
+      sw.title = '클릭: 이 색 선택 · 더블클릭: 팔레트에서 삭제';
+      sw.addEventListener('click', () => {
+        $('ctlHighlightColor').value = color;
+        renderPalette();
+      });
+      sw.addEventListener('dblclick', () => {
+        hlPalette = hlPalette.filter(c => c !== color);
+        safeStorageSet(PALETTE_KEY, hlPalette);
+        renderPalette();
+      });
+      hlPaletteEl.appendChild(sw);
+    });
+  }
+
+  $('hlPaletteAddBtn').addEventListener('click', () => {
+    const color = $('ctlHighlightColor').value;
+    if (hlPalette.some(c => c.toLowerCase() === color.toLowerCase())){
+      showError('이미 팔레트에 있는 색이에요.');
+      return;
+    }
+    if (hlPalette.length >= 12){
+      showError('팔레트는 최대 12개까지 저장할 수 있어요.');
+      return;
+    }
+    hlPalette.push(color);
+    safeStorageSet(PALETTE_KEY, hlPalette);
+    renderPalette();
+    showSuccess('팔레트에 색을 추가했어요.');
+  });
+
+  $('ctlHighlightColor').addEventListener('input', renderPalette);
+
   // ---------- control wiring ----------
+  sourceText.addEventListener('input', () => {
+    sourceText.classList.remove('warn');
+    state.text = sourceText.value;
+    updateCharStats();
+    scheduleRepaginate();
+  });
+
   $('ctlPageSize').addEventListener('click', e => {
     const btn = e.target.closest('button');
     if (!btn) return;
@@ -1850,9 +2102,16 @@
 "하지만 그는 알고 있었다. 완전히 지워지는 마음 같은 건 없다는 걸. 눈 밑에는 여전히 발자국의 모양대로 눌린 자리가 남아 있을 테니까.\n" +
 "그는 편지를 서랍 깊숙이 넣고, 대신 새 종이를 꺼냈다. 답장을 쓸 생각이었다.";
     sourceText.classList.remove('warn');
+    state.text = sourceText.value;
+    updateCharStats();
+    scheduleRepaginate();
   });
 
   // initial paint
+  refreshProfileSelect();
+  renderPalette();
+  updateCharStats();
+  updatePageEstimate();
   fitStage();
 })();
 </script>
