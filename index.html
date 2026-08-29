@@ -1540,11 +1540,12 @@
 
         if (paraHighlights.length){
           const boxes = computeLineLayout(ctx, line.text, state.align, lx, lw, isLast);
-          // Fill the FULL line-height band (not a shrunk 92%) so that a highlight
-          // spanning wrapped lines has each line's box touch the next with zero gap —
-          // matching how the in-page <mark> (box-decoration-break: clone) paints it.
-          const hlTop = y - fontSizePx * 0.82;
-          const hlHeight = lineHeightPx;
+          // Size the box off the FONT size, not the (often much larger) line-height —
+          // a generous line-height is meant to space out lines for reading, not to
+          // inflate the highlighter stroke. This mirrors how the in-page <mark> looks:
+          // a snug band hugging the glyphs, regardless of how loose the line spacing is.
+          const hlTop = y - fontSizePx * 0.78;
+          const hlHeight = fontSizePx * 1.12;
           const hlRadius = Math.min(2 * s, hlHeight / 2);
           paraHighlights.forEach(h => {
             const clampedStart = Math.max(0, h.start - line.start);
