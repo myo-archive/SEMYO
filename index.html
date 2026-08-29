@@ -1540,6 +1540,12 @@
 
         if (paraHighlights.length){
           const boxes = computeLineLayout(ctx, line.text, state.align, lx, lw, isLast);
+          // Fill the FULL line-height band (not a shrunk 92%) so that a highlight
+          // spanning wrapped lines has each line's box touch the next with zero gap —
+          // matching how the in-page <mark> (box-decoration-break: clone) paints it.
+          const hlTop = y - fontSizePx * 0.82;
+          const hlHeight = lineHeightPx;
+          const hlRadius = Math.min(2 * s, hlHeight / 2);
           paraHighlights.forEach(h => {
             const clampedStart = Math.max(0, h.start - line.start);
             const clampedEnd = Math.min(line.text.length, h.end - line.start);
@@ -1547,7 +1553,15 @@
             const range = highlightPixelRange(ctx, boxes, clampedStart, clampedEnd);
             if (!range) return;
             ctx.fillStyle = hexToRgba(h.color, HIGHLIGHT_ALPHA);
-            ctx.fillRect(range.x1 - 1 * s, y - fontSizePx * 0.82, (range.x2 - range.x1) + 2 * s, lineHeightPx * 0.92);
+            const rx = range.x1 - 1 * s;
+            const rw = (range.x2 - range.x1) + 2 * s;
+            if (typeof ctx.roundRect === 'function'){
+              ctx.beginPath();
+              ctx.roundRect(rx, hlTop, rw, hlHeight, hlRadius);
+              ctx.fill();
+            } else {
+              ctx.fillRect(rx, hlTop, rw, hlHeight);
+            }
           });
           ctx.fillStyle = state.ink;
         }
