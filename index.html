@@ -501,6 +501,8 @@
         <div class="seg" id="ctlPageSize">
           <button data-v="a5" class="active">A5</button>
           <button data-v="a4">A4</button>
+          <button data-v="square">정사각형</button>
+          <button data-v="ratio23">2:3</button>
         </div>
       </div>
 
@@ -516,8 +518,21 @@
         <button class="cover-remove" id="coverRemoveBtn" type="button" style="display:none;">사진 제거</button>
 
         <div id="coverOptionsWrap" style="display:none; margin-top:12px;">
-          <div class="field-label"><span>사진 높이</span><span class="val" id="valCoverHeight">30%</span></div>
-          <input type="range" id="ctlCoverHeight" min="15" max="45" step="1" value="30" />
+          <div class="field-label"><span>표시 방식</span></div>
+          <div class="seg" id="ctlCoverMode" style="margin-bottom:14px;">
+            <button data-v="banner" class="active">상단 배너</button>
+            <button data-v="background">전체 배경</button>
+          </div>
+
+          <div id="coverHeightField">
+            <div class="field-label"><span>사진 높이</span><span class="val" id="valCoverHeight">30%</span></div>
+            <input type="range" id="ctlCoverHeight" min="15" max="45" step="1" value="30" />
+          </div>
+
+          <div id="coverOverlayField" style="display:none;">
+            <div class="field-label"><span>오버레이 어둡기</span><span class="val" id="valCoverOverlay">40%</span></div>
+            <input type="range" id="ctlCoverOverlay" min="0" max="80" step="5" value="40" />
+          </div>
 
           <div class="field-label" style="margin-top:14px;"><span>사진 크기</span><span class="val" id="valCoverScale">100%</span></div>
           <input type="range" id="ctlCoverScale" min="100" max="250" step="5" value="100" />
@@ -530,7 +545,7 @@
 
           <label class="checkline" style="margin-top:14px;">
             <input type="checkbox" id="ctlCoverAllPages" />
-            모든 페이지 상단에 표시
+            모든 페이지에 표시
           </label>
         </div>
       </div>
@@ -714,7 +729,9 @@
   const MM_PX = 96/25.4;
   const PAGE_SIZES = {
     a5: { w: 148, h: 210, label: 'A5' },
-    a4: { w: 210, h: 297, label: 'A4' }
+    a4: { w: 210, h: 297, label: 'A4' },
+    square: { w: 160, h: 160, label: '정사각형' },
+    ratio23: { w: 140, h: 210, label: '2:3' }
   };
   function currentPageSize(){ return PAGE_SIZES[state.pageSize] || PAGE_SIZES.a5; }
   function pagePx(){
@@ -748,6 +765,8 @@
     divider:true,
     pageSize:"a5",
     coverImage:null,
+    coverMode:"banner", // "banner" (top strip) or "background" (full-page photo behind the text)
+    coverOverlayOpacity:40,
     coverHeightPct:30,
     coverOnAllPages:false,
     coverScale:100,
@@ -788,7 +807,7 @@
   const PROFILE_FIELDS = [
     'font','fontSize','align','lineHeight','letterSpacing','paraSpace','indent',
     'padding','paper','ink','pageSize','divider','title',
-    'coverHeightPct','coverScale','coverPosX','coverPosY','coverOnAllPages'
+    'coverMode','coverOverlayOpacity','coverHeightPct','coverScale','coverPosX','coverPosY','coverOnAllPages'
   ];
 
   let profiles = safeStorageGet(PROFILES_KEY, {});
@@ -872,11 +891,20 @@
     page.className = 'page';
     pageStyleVars(page, size);
 
+    const isBgMode = state.coverMode === 'background';
+
     if (hasCover && state.coverImage){
       const cover = document.createElement('div');
       cover.className = 'cover-photo';
-      const coverH = size.h * (state.coverHeightPct / 100);
-      cover.style.height = coverH + 'mm';
+      if (isBgMode){
+        cover.style.position = 'absolute';
+        cover.style.inset = '0';
+        cover.style.height = '100%';
+        cover.style.zIndex = '0';
+      } else {
+        const coverH = size.h * (state.coverHeightPct / 100);
+        cover.style.height = coverH + 'mm';
+      }
       const img = document.createElement('img');
       img.src = state.coverImage;
       img.alt = '';
@@ -886,11 +914,24 @@
       img.style.transform = 'scale(' + (state.coverScale / 100) + ')';
       cover.appendChild(img);
       page.appendChild(cover);
+
+      if (isBgMode){
+        const dim = document.createElement('div');
+        dim.style.position = 'absolute';
+        dim.style.inset = '0';
+        dim.style.zIndex = '0';
+        dim.style.background = 'rgba(0,0,0,' + (state.coverOverlayOpacity / 100) + ')';
+        page.appendChild(dim);
+      }
     }
 
     const body = document.createElement('div');
     body.className = 'page-body';
     bodyStyleVars(body);
+    if (isBgMode && hasCover && state.coverImage){
+      body.style.position = 'relative';
+      body.style.zIndex = '1';
+    }
     page.appendChild(body);
 
     return { page, body };
@@ -1051,7 +1092,7 @@
     // survive repagination even if page breaks shift.
 
     const capNoCover = measureCapacity(false);
-    const capWithCover = state.coverImage ? measureCapacity(true) : capNoCover;
+    const capWithCover = (state.coverImage && state.coverMode === 'banner') ? measureCapacity(true) : capNoCover;
 
     const measurer = document.createElement('div');
     textStyleVars(measurer);
@@ -1068,7 +1109,8 @@
     let current = [];
 
     function capacityForCurrentPage(){
-      return hasCoverForIndex(result.length) ? capWithCover : capNoCover;
+      if (!hasCoverForIndex(result.length)) return capNoCover;
+      return state.coverMode === 'background' ? capNoCover : capWithCover;
     }
 
     function fitsWhole(para){
@@ -1492,13 +1534,22 @@
     ctx.fillStyle = state.paper;
     ctx.fillRect(0, 0, wPx, hPx);
 
-    // cover photo (full-bleed banner)
+    // cover photo (top banner, or full-page background)
     const hasCover = hasCoverForIndex(idx);
     let bodyTop = 0;
     if (hasCover && coverImgEl){
-      const coverHPx = size.h * (state.coverHeightPct / 100) * MM_PX * s;
-      drawImageCover(ctx, coverImgEl, 0, 0, wPx, coverHPx, state.coverScale, state.coverPosX, state.coverPosY);
-      bodyTop = coverHPx;
+      if (state.coverMode === 'background'){
+        drawImageCover(ctx, coverImgEl, 0, 0, wPx, hPx, state.coverScale, state.coverPosX, state.coverPosY);
+        if (state.coverOverlayOpacity > 0){
+          ctx.fillStyle = 'rgba(0,0,0,' + (state.coverOverlayOpacity / 100) + ')';
+          ctx.fillRect(0, 0, wPx, hPx);
+        }
+        bodyTop = 0;
+      } else {
+        const coverHPx = size.h * (state.coverHeightPct / 100) * MM_PX * s;
+        drawImageCover(ctx, coverImgEl, 0, 0, wPx, coverHPx, state.coverScale, state.coverPosX, state.coverPosY);
+        bodyTop = coverHPx;
+      }
     }
 
     // layout metrics
@@ -1822,11 +1873,14 @@
     $('ctlInk').value = state.ink;
     $('ctlTitle').value = state.title;
     $('ctlDivider').checked = state.divider;
+    [...$('ctlCoverMode').children].forEach(b => b.classList.toggle('active', b.dataset.v === state.coverMode));
     $('ctlCoverHeight').value = state.coverHeightPct; $('valCoverHeight').textContent = state.coverHeightPct + '%';
+    $('ctlCoverOverlay').value = state.coverOverlayOpacity; $('valCoverOverlay').textContent = state.coverOverlayOpacity + '%';
     $('ctlCoverScale').value = state.coverScale; $('valCoverScale').textContent = state.coverScale + '%';
     $('ctlCoverPosX').value = state.coverPosX; $('valCoverPosX').textContent = state.coverPosX + '%';
     $('ctlCoverPosY').value = state.coverPosY; $('valCoverPosY').textContent = state.coverPosY + '%';
     $('ctlCoverAllPages').checked = state.coverOnAllPages;
+    updateCoverModeUI();
     if (snap.highlightColor){
       $('ctlHighlightColor').value = snap.highlightColor;
       renderPalette();
@@ -1962,6 +2016,27 @@
   const coverPreviewImg = $('coverPreviewImg');
   const coverRemoveBtn = $('coverRemoveBtn');
   const coverOptionsWrap = $('coverOptionsWrap');
+
+  function updateCoverModeUI(){
+    const isBg = state.coverMode === 'background';
+    $('coverHeightField').style.display = isBg ? 'none' : 'block';
+    $('coverOverlayField').style.display = isBg ? 'block' : 'none';
+  }
+
+  $('ctlCoverMode').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    state.coverMode = btn.dataset.v;
+    [...$('ctlCoverMode').children].forEach(b => b.classList.toggle('active', b === btn));
+    updateCoverModeUI();
+    scheduleRepaginate();
+  });
+
+  $('ctlCoverOverlay').addEventListener('input', e => {
+    state.coverOverlayOpacity = parseFloat(e.target.value);
+    $('valCoverOverlay').textContent = state.coverOverlayOpacity + '%';
+    rerenderCosmetic();
+  });
 
   coverUploadBtn.addEventListener('click', () => coverFileInput.click());
 
