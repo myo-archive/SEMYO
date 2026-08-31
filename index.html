@@ -6,7 +6,7 @@
 <title>로그 발췌기 — 소설형 발췌 도구</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Gamja+Flower&family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@400;500;600;700&family=Song+Myung&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=Noto+Serif+KR:wght@400;500;600;700&family=Song+Myung&display=swap" rel="stylesheet" />
 <style>
 @font-face {
   font-family: 'RIDIBatang';
@@ -352,7 +352,6 @@
   .page-text.font-gowun{ font-family:'Gowun Batang', serif; }
   .page-text.font-song{ font-family:'Song Myung', serif; }
   .page-text.font-sans{ font-family:'Noto Sans KR', sans-serif; }
-  .page-text.font-gamja{ font-family:'Gamja Flower', cursive; }
   .page-text.font-ridibatang{ font-family:'RIDIBatang', serif; }
   .page-text p{
     margin:0 0 var(--para-space,6pt) 0;
@@ -362,15 +361,19 @@
   }
   .page-text p.continued{ text-indent:0; }
   .page-text p:last-child{ margin-bottom:0; }
+  .page-text .style-mark{
+    cursor: pointer;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
   .page-text mark.hl-mark{
     background-color: transparent;
     color: inherit;
     padding: 0 1px;
     border-radius: 2px;
-    cursor: pointer;
-    box-decoration-break: clone;
-    -webkit-box-decoration-break: clone;
   }
+  .page-text .style-bold{ font-weight: 700; }
+  .page-text .style-italic{ font-style: italic; }
 
   .page-footer{
     flex:0 0 auto; height:7mm; z-index:1;
@@ -509,7 +512,7 @@
         <div class="seg" id="ctlPageSize">
           <button data-v="a5" class="active">A5</button>
           <button data-v="a4">A4</button>
-          <button data-v="square">정사각형</button>
+          <button data-v="square">1:1</button>
           <button data-v="ratio23">2:3</button>
         </div>
       </div>
@@ -571,7 +574,6 @@
           <option value="gowun">고운바탕체</option>
           <option value="song">송명체</option>
           <option value="sans">본고딕</option>
-          <option value="gamja">감자꽃마을체</option>
           <option value="ridibatang">리디바탕</option>
         </select>
       </div>
@@ -641,6 +643,15 @@
           <button class="btn btn-secondary" id="clearHighlightBtn" type="button" disabled>전체 지우기</button>
         </div>
         <div class="hint" style="margin-top:8px; margin-bottom:0;">페이지에서 문장을 드래그로 선택한 뒤 위 버튼을 누르면 강조돼요. 강조된 부분을 클릭하면 해제됩니다.</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label"><span>글자 스타일</span></div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="applyBoldBtn" type="button" disabled><b>B</b>&nbsp;굵게</button>
+          <button class="btn btn-secondary" id="applyItalicBtn" type="button" disabled><i>I</i>&nbsp;기울임</button>
+        </div>
+        <div class="hint" style="margin-top:8px; margin-bottom:0;">페이지에서 문장을 드래그로 선택한 뒤 위 버튼을 누르면 적용돼요. 적용된 부분을 클릭하면 서식이 지워집니다.</div>
       </div>
 
       <div class="field">
@@ -739,7 +750,7 @@
   const PAGE_SIZES = {
     a5: { w: 148, h: 210, label: 'A5' },
     a4: { w: 210, h: 297, label: 'A4' },
-    square: { w: 160, h: 160, label: '정사각형' },
+    square: { w: 160, h: 160, label: '1:1' },
     ratio23: { w: 140, h: 210, label: '2:3' }
   };
   function currentPageSize(){ return PAGE_SIZES[state.pageSize] || PAGE_SIZES.a5; }
@@ -754,7 +765,6 @@
     gowun: { css: 'font-gowun', family: 'Gowun Batang',    canvas: '"Gowun Batang", serif' },
     song:  { css: 'font-song',  family: 'Song Myung',      canvas: '"Song Myung", serif' },
     sans:  { css: 'font-sans',  family: 'Noto Sans KR',    canvas: '"Noto Sans KR", sans-serif' },
-    gamja: { css: 'font-gamja', family: 'Gamja Flower',    canvas: '"Gamja Flower", cursive' },
     ridibatang: { css: 'font-ridibatang', family: 'RIDIBatang', canvas: '"RIDIBatang", serif' }
   };
 
@@ -783,6 +793,8 @@
     coverPosX:50,
     coverPosY:50,
     highlights:[], // { paraIndex, start, end, color } — offsets are relative to the raw (trimmed) source paragraph text
+    boldRanges:[], // { paraIndex, start, end } — same offset convention as highlights
+    italicRanges:[], // { paraIndex, start, end }
     saveName:""
   };
   const HIGHLIGHT_ALPHA = 0.55;
@@ -839,6 +851,8 @@
   const copyImageBtn = $('copyImageBtn');
   const applyHighlightBtn = $('applyHighlightBtn');
   const clearHighlightBtn = $('clearHighlightBtn');
+  const applyBoldBtn = $('applyBoldBtn');
+  const applyItalicBtn = $('applyItalicBtn');
   const stage = $('stage');
   const placeholder = $('placeholder');
   const pageWrap = $('pageWrap');
@@ -966,7 +980,7 @@
       if (p.continued) pEl.classList.add('continued');
       pEl.dataset.paraIndex = p.paraIndex;
       pEl.dataset.chunkStart = p.start;
-      renderParagraphWithHighlights(pEl, p);
+      renderParagraphStyled(pEl, p);
       textEl.appendChild(pEl);
     });
     body.appendChild(textEl);
@@ -974,7 +988,11 @@
     return page;
   }
 
-  // ---------- highlights ----------
+  // ---------- highlights / bold / italic (unified as "styles") ----------
+  // All three are stored as separate range lists using the same offset
+  // convention: { paraIndex, start, end[, color] }, offsets relative to the
+  // raw (trimmed) source paragraph text. For rendering, the three lists are
+  // merged into non-overlapping "runs" that cover a chunk end-to-end.
   function getHighlightsForChunk(chunk){
     return state.highlights
       .filter(h => h.paraIndex === chunk.paraIndex && h.end > chunk.start && h.start < chunk.end)
@@ -988,42 +1006,76 @@
       .sort((a, b) => a.start - b.start);
   }
 
-  function renderParagraphWithHighlights(pEl, chunk){
-    pEl.textContent = '';
+  function getRangesForChunk(list, chunk){
+    return list
+      .filter(r => r.paraIndex === chunk.paraIndex && r.end > chunk.start && r.start < chunk.end)
+      .map(r => ({
+        start: Math.max(0, r.start - chunk.start),
+        end: Math.min(chunk.text.length, r.end - chunk.start)
+      }))
+      .filter(r => r.end > r.start);
+  }
+
+  function getStyleRunsForChunk(chunk){
     const hls = getHighlightsForChunk(chunk);
-    if (hls.length === 0){
+    const bolds = getRangesForChunk(state.boldRanges, chunk);
+    const italics = getRangesForChunk(state.italicRanges, chunk);
+
+    const points = new Set([0, chunk.text.length]);
+    hls.forEach(h => { points.add(h.start); points.add(h.end); });
+    bolds.forEach(r => { points.add(r.start); points.add(r.end); });
+    italics.forEach(r => { points.add(r.start); points.add(r.end); });
+    const sorted = Array.from(points).sort((a, b) => a - b);
+
+    const runs = [];
+    for (let i = 0; i < sorted.length - 1; i++){
+      const s = sorted[i], e = sorted[i + 1];
+      if (e <= s) continue;
+      const mid = (s + e) / 2;
+      const hl = hls.find(h => mid >= h.start && mid < h.end);
+      const bold = bolds.some(r => mid >= r.start && mid < r.end);
+      const italic = italics.some(r => mid >= r.start && mid < r.end);
+      runs.push({ start: s, end: e, highlightColor: hl ? hl.color : null, bold, italic });
+    }
+    return runs;
+  }
+
+  function renderParagraphStyled(pEl, chunk){
+    pEl.textContent = '';
+    const runs = getStyleRunsForChunk(chunk);
+    const isPlain = runs.length <= 1 && runs.every(r => !r.highlightColor && !r.bold && !r.italic);
+    if (isPlain){
       pEl.textContent = chunk.text;
       return;
     }
-    let cursor = 0;
-    hls.forEach(h => {
-      const start = Math.max(h.start, cursor);
-      const end = h.end;
-      if (start >= end) return;
-      if (start > cursor){
-        pEl.appendChild(document.createTextNode(chunk.text.slice(cursor, start)));
+    runs.forEach(run => {
+      const text = chunk.text.slice(run.start, run.end);
+      if (!run.highlightColor && !run.bold && !run.italic){
+        pEl.appendChild(document.createTextNode(text));
+        return;
       }
-      const mark = document.createElement('mark');
-      mark.className = 'hl-mark';
-      mark.style.backgroundColor = hexToRgba(h.color, HIGHLIGHT_ALPHA);
-      mark.title = '클릭하면 강조가 지워져요';
-      mark.textContent = chunk.text.slice(start, end);
-      mark.addEventListener('click', (e) => {
+      const el = document.createElement(run.highlightColor ? 'mark' : 'span');
+      let cls = 'style-mark';
+      if (run.highlightColor) cls += ' hl-mark';
+      if (run.bold) cls += ' style-bold';
+      if (run.italic) cls += ' style-italic';
+      el.className = cls;
+      if (run.highlightColor) el.style.backgroundColor = hexToRgba(run.highlightColor, HIGHLIGHT_ALPHA);
+      el.title = '클릭하면 서식이 지워져요';
+      el.textContent = text;
+      el.addEventListener('click', (e) => {
         e.stopPropagation();
-        removeHighlight(h.ref);
+        removeStylesInRange(chunk.paraIndex, chunk.start + run.start, chunk.start + run.end);
       });
-      pEl.appendChild(mark);
-      cursor = end;
+      pEl.appendChild(el);
     });
-    if (cursor < chunk.text.length){
-      pEl.appendChild(document.createTextNode(chunk.text.slice(cursor)));
-    }
   }
 
-  function removeHighlight(hlObj){
-    const idx = state.highlights.indexOf(hlObj);
-    if (idx === -1) return;
-    state.highlights.splice(idx, 1);
+  function removeStylesInRange(paraIndex, start, end){
+    const overlaps = (r) => r.paraIndex === paraIndex && r.start < end && r.end > start;
+    state.highlights = state.highlights.filter(h => !overlaps(h));
+    state.boldRanges = state.boldRanges.filter(r => !overlaps(r));
+    state.italicRanges = state.italicRanges.filter(r => !overlaps(r));
     if (hasGenerated) renderPage(currentIndex, null);
   }
 
@@ -1040,13 +1092,17 @@
   }
 
   function applyHighlightFromSelection(){
+    const color = $('ctlHighlightColor').value;
+    applyRangeFromSelection(state.highlights, { color }, '먼저 페이지에서 강조할 문장을 드래그해 선택해주세요.');
+  }
+
+  function applyRangeFromSelection(list, extra, emptyMsg){
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed){
-      showError('먼저 페이지에서 강조할 문장을 드래그해 선택해주세요.');
+      showError(emptyMsg);
       return;
     }
     const range = sel.getRangeAt(0);
-    const color = $('ctlHighlightColor').value;
     const ps = pageWrap.querySelectorAll('.page-text p');
     let applied = false;
     ps.forEach(p => {
@@ -1059,12 +1115,11 @@
       if (localEnd <= localStart) return;
       const paraIndex = parseInt(p.dataset.paraIndex, 10);
       const chunkStart = parseInt(p.dataset.chunkStart, 10);
-      state.highlights.push({
+      list.push(Object.assign({
         paraIndex,
         start: chunkStart + localStart,
-        end: chunkStart + localEnd,
-        color
-      });
+        end: chunkStart + localEnd
+      }, extra));
       applied = true;
     });
     if (applied){
@@ -1257,6 +1312,8 @@
     copyImageBtn.disabled = false;
     applyHighlightBtn.disabled = false;
     clearHighlightBtn.disabled = false;
+    applyBoldBtn.disabled = false;
+    applyItalicBtn.disabled = false;
     fitStage();
     renderPage(currentIndex, null);
   }
@@ -1346,10 +1403,19 @@
   async function ensureFonts(){
     try{
       const fam = (FONT_OPTIONS[state.font] || FONT_OPTIONS.noto).family;
-      await document.fonts.load('400 ' + state.fontSize + 'pt "' + fam + '"');
-      await document.fonts.load('400 8pt "Noto Sans KR"');
+      await Promise.all([
+        document.fonts.load('400 ' + state.fontSize + 'pt "' + fam + '"'),
+        document.fonts.load('700 ' + state.fontSize + 'pt "' + fam + '"'),
+        document.fonts.load('italic 400 ' + state.fontSize + 'pt "' + fam + '"'),
+        document.fonts.load('italic 700 ' + state.fontSize + 'pt "' + fam + '"'),
+        document.fonts.load('400 8pt "Noto Sans KR"')
+      ]);
       await document.fonts.ready;
     }catch(e){ /* best effort */ }
+  }
+
+  function runsFontString(bold, italic, fontSizePx, fontFamily){
+    return (italic ? 'italic ' : 'normal ') + (bold ? '700 ' : '400 ') + fontSizePx + 'px ' + fontFamily;
   }
 
   function loadCoverImage(dataUrl){
@@ -1375,92 +1441,6 @@
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
-  function wrapWords(ctx, text, maxWidth, firstLineIndent){
-    const words = text.split(' ');
-    const lines = [];
-    let line = '';
-    let isFirst = true;
-    for (let i = 0; i < words.length; i++){
-      const word = words[i];
-      const test = line ? (line + ' ' + word) : word;
-      const avail = maxWidth - (isFirst ? firstLineIndent : 0);
-      if (ctx.measureText(test).width > avail && line){
-        lines.push(line);
-        line = word;
-        isFirst = false;
-      } else {
-        line = test;
-      }
-    }
-    if (line || lines.length === 0) lines.push(line);
-    return lines;
-  }
-
-  function wrapWordsWithOffsets(ctx, text, maxWidth, firstLineIndent){
-    // Same wrapping logic as wrapWords, but each returned line also carries
-    // its [start,end) character offset within `text`, so highlight ranges
-    // (tracked in chunk-local character offsets) can be mapped onto lines.
-    const wordMatches = [];
-    let idx = 0;
-    text.split(' ').forEach(w => {
-      const start = idx;
-      idx += w.length;
-      wordMatches.push({ word: w, start, end: idx });
-      idx += 1; // account for the separating space
-    });
-
-    const lines = [];
-    let line = '';
-    let lineStart = 0;
-    let isFirst = true;
-    wordMatches.forEach(wm => {
-      const test = line ? (line + ' ' + wm.word) : wm.word;
-      const avail = maxWidth - (isFirst ? firstLineIndent : 0);
-      if (ctx.measureText(test).width > avail && line){
-        lines.push({ text: line, start: lineStart, end: lineStart + line.length });
-        line = wm.word;
-        lineStart = wm.start;
-        isFirst = false;
-      } else {
-        if (line === '') lineStart = wm.start;
-        line = test;
-      }
-    });
-    if (line || lines.length === 0) lines.push({ text: line, start: lineStart, end: lineStart + line.length });
-    return lines;
-  }
-
-  function computeLineLayout(ctx, lineText, align, lx, lw, isLast){
-    // Mirrors the x-positioning math used when the line is actually drawn
-    // (left / center / right / justify), so highlight rects line up with the text.
-    const words = lineText.split(' ');
-    const spaceWidth = ctx.measureText(' ').width;
-    const wordWidths = words.map(w => ctx.measureText(w).width);
-    const totalWordsWidth = wordWidths.reduce((a, b) => a + b, 0);
-    let gap = spaceWidth;
-    let startX;
-    if (align === 'justify' && !isLast && words.length > 1){
-      gap = Math.max(0, (lw - totalWordsWidth) / (words.length - 1));
-      startX = lx;
-    } else if (align === 'center'){
-      const totalWidth = totalWordsWidth + spaceWidth * (words.length - 1);
-      startX = lx + (lw - totalWidth) / 2;
-    } else if (align === 'right'){
-      const totalWidth = totalWordsWidth + spaceWidth * (words.length - 1);
-      startX = lx + lw - totalWidth;
-    } else {
-      startX = lx;
-    }
-    const boxes = [];
-    let cx = startX;
-    let charOffset = 0;
-    words.forEach((w, i) => {
-      boxes.push({ text: w, start: charOffset, end: charOffset + w.length, x: cx, width: wordWidths[i] });
-      cx += wordWidths[i] + gap;
-      charOffset += w.length + 1;
-    });
-    return boxes;
-  }
 
   function highlightPixelRange(ctx, boxes, hlStart, hlEnd){
     let x1 = null, x2 = null;
@@ -1480,21 +1460,128 @@
     return x1 === null ? null : { x1, x2 };
   }
 
-  function drawJustifiedLine(ctx, text, x, y, width){
-    const words = text.split(' ');
-    if (words.length <= 1){
-      ctx.textAlign = 'left';
-      ctx.fillText(text, x, y);
-      return;
+  // ---------- styled (bold/italic) canvas text layout ----------
+  // Mirrors wrapWordsWithOffsets / computeLineLayout above, but measures each
+  // word's width by summing its style-consistent sub-segments (a word may
+  // itself straddle a bold/italic boundary if the user's drag selection
+  // didn't land exactly on a word edge), so wrapping and alignment account
+  // for bold text being wider than normal.
+  function sliceRunsToLine(runs, lineStart, lineEnd){
+    return runs
+      .map(r => ({
+        start: Math.max(0, r.start - lineStart),
+        end: Math.min(lineEnd - lineStart, r.end - lineStart),
+        bold: r.bold,
+        italic: r.italic
+      }))
+      .filter(r => r.end > r.start);
+  }
+
+  function measureWordWidthStyled(ctx, text, wStart, wEnd, lineRuns, fontSizePx, fontFamily){
+    if (wEnd <= wStart) return 0;
+    const relevant = lineRuns.filter(r => r.end > wStart && r.start < wEnd).sort((a, b) => a.start - b.start);
+    if (relevant.length === 0){
+      ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+      return ctx.measureText(text.slice(wStart, wEnd)).width;
     }
-    const totalWidth = words.reduce((sum, w) => sum + ctx.measureText(w).width, 0);
-    const gap = Math.max(0, (width - totalWidth) / (words.length - 1));
-    let cx = x;
-    ctx.textAlign = 'left';
-    words.forEach(w => {
-      ctx.fillText(w, cx, y);
-      cx += ctx.measureText(w).width + gap;
+    let width = 0;
+    let cursor = wStart;
+    relevant.forEach(r => {
+      const s = Math.max(cursor, r.start);
+      const e = Math.min(wEnd, r.end);
+      if (s > cursor){
+        ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+        width += ctx.measureText(text.slice(cursor, s)).width;
+      }
+      if (s < e){
+        ctx.font = runsFontString(r.bold, r.italic, fontSizePx, fontFamily);
+        width += ctx.measureText(text.slice(s, e)).width;
+        cursor = e;
+      }
     });
+    if (cursor < wEnd){
+      ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+      width += ctx.measureText(text.slice(cursor, wEnd)).width;
+    }
+    return width;
+  }
+
+  function wrapWordsStyled(ctx, text, maxWidth, firstLineIndent, runs, fontSizePx, fontFamily){
+    const wordMatches = [];
+    let idx = 0;
+    text.split(' ').forEach(w => {
+      const start = idx;
+      idx += w.length;
+      wordMatches.push({ word: w, start, end: idx });
+      idx += 1;
+    });
+
+    ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+    const spaceWidth = ctx.measureText(' ').width;
+
+    const lines = [];
+    let line = '';
+    let lineStart = 0;
+    let isFirst = true;
+    let lineWidth = 0;
+    wordMatches.forEach(wm => {
+      const wWidth = measureWordWidthStyled(ctx, text, wm.start, wm.end, runs, fontSizePx, fontFamily);
+      const prospectiveWidth = line ? (lineWidth + spaceWidth + wWidth) : wWidth;
+      const avail = maxWidth - (isFirst ? firstLineIndent : 0);
+      if (prospectiveWidth > avail && line){
+        lines.push({ text: line, start: lineStart, end: lineStart + line.length });
+        line = wm.word;
+        lineStart = wm.start;
+        isFirst = false;
+        lineWidth = wWidth;
+      } else {
+        if (line === '') lineStart = wm.start;
+        line = line ? (line + ' ' + wm.word) : wm.word;
+        lineWidth = prospectiveWidth;
+      }
+    });
+    if (line || lines.length === 0) lines.push({ text: line, start: lineStart, end: lineStart + line.length });
+    return lines;
+  }
+
+  function computeLineLayoutStyled(ctx, lineText, align, lx, lw, isLast, lineRuns, fontSizePx, fontFamily){
+    const words = lineText.split(' ');
+    ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+    const spaceWidth = ctx.measureText(' ').width;
+
+    let charOffset = 0;
+    const wordSpans = words.map(w => {
+      const s = charOffset;
+      charOffset += w.length;
+      const e = charOffset;
+      charOffset += 1;
+      return { text: w, start: s, end: e };
+    });
+    const wordWidths = wordSpans.map(ws => measureWordWidthStyled(ctx, lineText, ws.start, ws.end, lineRuns, fontSizePx, fontFamily));
+    const totalWordsWidth = wordWidths.reduce((a, b) => a + b, 0);
+
+    let gap = spaceWidth;
+    let startX;
+    if (align === 'justify' && !isLast && words.length > 1){
+      gap = Math.max(0, (lw - totalWordsWidth) / (words.length - 1));
+      startX = lx;
+    } else if (align === 'center'){
+      const totalWidth = totalWordsWidth + spaceWidth * (words.length - 1);
+      startX = lx + (lw - totalWidth) / 2;
+    } else if (align === 'right'){
+      const totalWidth = totalWordsWidth + spaceWidth * (words.length - 1);
+      startX = lx + lw - totalWidth;
+    } else {
+      startX = lx;
+    }
+
+    const boxes = [];
+    let cx = startX;
+    wordSpans.forEach((ws, i) => {
+      boxes.push({ text: ws.text, start: ws.start, end: ws.end, x: cx, width: wordWidths[i] });
+      cx += wordWidths[i] + gap;
+    });
+    return boxes;
   }
 
   function drawImageCover(ctx, img, x, y, w, h, scalePct, posXPct, posYPct){
@@ -1591,20 +1678,24 @@
     let y = contentTop + fontSizePx * 0.85;
     paras.forEach(para => {
       const indent = para.continued ? 0 : indentPx;
-      const lines = wrapWordsWithOffsets(ctx, para.text, contentW, indent);
+      const runs = getStyleRunsForChunk(para); // covers [0, para.text.length) end-to-end, no gaps
+      const lines = wrapWordsStyled(ctx, para.text, contentW, indent, runs, fontSizePx, fontFamily);
       const paraHighlights = getHighlightsForChunk(para);
       lines.forEach((line, li) => {
         const lineIndent = li === 0 ? indent : 0;
         const lx = contentX + lineIndent;
         const lw = contentW - lineIndent;
         const isLast = li === lines.length - 1;
+        const lineRuns = sliceRunsToLine(runs, line.start, line.end);
+
+        const boxes = computeLineLayoutStyled(ctx, line.text, state.align, lx, lw, isLast, lineRuns, fontSizePx, fontFamily);
 
         if (paraHighlights.length){
-          const boxes = computeLineLayout(ctx, line.text, state.align, lx, lw, isLast);
           // Size the box off the FONT size, not the (often much larger) line-height —
           // a generous line-height is meant to space out lines for reading, not to
           // inflate the highlighter stroke. This mirrors how the in-page <mark> looks:
           // a snug band hugging the glyphs, regardless of how loose the line spacing is.
+          ctx.font = runsFontString(false, false, fontSizePx, fontFamily); // base metrics for the highlight-rect hit test
           const hlTop = y - fontSizePx * 0.78;
           const hlHeight = fontSizePx * 1.12;
           const hlRadius = Math.min(2 * s, hlHeight / 2);
@@ -1628,18 +1719,45 @@
           ctx.fillStyle = state.ink;
         }
 
-        if (state.align === 'center'){
-          ctx.textAlign = 'center';
-          ctx.fillText(line.text, lx + lw / 2, y);
-        } else if (state.align === 'right'){
-          ctx.textAlign = 'right';
-          ctx.fillText(line.text, lx + lw, y);
-        } else if (state.align === 'justify' && !isLast){
-          drawJustifiedLine(ctx, line.text, lx, y, lw);
-        } else {
-          ctx.textAlign = 'left';
-          ctx.fillText(line.text, lx, y);
-        }
+        // Draw each word, split into style-consistent sub-segments (bold/italic
+        // boundaries may fall mid-word if a drag selection didn't land on a
+        // word edge). Box x-positions already encode the alignment (left /
+        // center / right / justify), so every segment is drawn with textAlign
+        // 'left' at its precomputed x.
+        ctx.textAlign = 'left';
+        boxes.forEach(box => {
+          const overlapping = lineRuns.filter(r => r.end > box.start && r.start < box.end).sort((a, b) => a.start - b.start);
+          if (overlapping.length === 0){
+            ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+            ctx.fillText(box.text, box.x, y);
+            return;
+          }
+          let curX = box.x;
+          let cursor = box.start;
+          overlapping.forEach(r => {
+            const s = Math.max(cursor, r.start);
+            const e = Math.min(box.end, r.end);
+            if (s > cursor){
+              ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+              const gapText = line.text.slice(cursor, s);
+              ctx.fillText(gapText, curX, y);
+              curX += ctx.measureText(gapText).width;
+            }
+            if (s < e){
+              ctx.font = runsFontString(r.bold, r.italic, fontSizePx, fontFamily);
+              const segText = line.text.slice(s, e);
+              ctx.fillText(segText, curX, y);
+              curX += ctx.measureText(segText).width;
+              cursor = e;
+            }
+          });
+          if (cursor < box.end){
+            ctx.font = runsFontString(false, false, fontSizePx, fontFamily);
+            const tailText = line.text.slice(cursor, box.end);
+            ctx.fillText(tailText, curX, y);
+          }
+        });
+
         y += lineHeightPx;
       });
       y += paraSpacePx;
@@ -2176,6 +2294,12 @@
     if (!state.highlights.length) return;
     state.highlights = [];
     if (hasGenerated) renderPage(currentIndex, null);
+  });
+  applyBoldBtn.addEventListener('click', () => {
+    applyRangeFromSelection(state.boldRanges, {}, '먼저 페이지에서 굵게 표시할 문장을 드래그해 선택해주세요.');
+  });
+  applyItalicBtn.addEventListener('click', () => {
+    applyRangeFromSelection(state.italicRanges, {}, '먼저 페이지에서 기울일 문장을 드래그해 선택해주세요.');
   });
 
   buildBtn.addEventListener('click', runBuild);
