@@ -466,6 +466,15 @@ function V(t,e){const n=D(v[t]||[],Number(o.startPage)+t,Y(t));n.classList.add("
   page.style.transition="none";
   page.style.opacity="1";
   page.style.pointerEvents="none";
+  // 페이지 배경을 캡처 대상과 캔버스 양쪽에 명시해 가장자리 투명 픽셀이
+  // 흰색으로 보이는 현상을 방지한다.
+  page.style.backgroundColor=o.paper;
+  page.style.backgroundImage="none";
+  page.style.border="0";
+  page.style.borderRadius="0";
+  page.style.outline="0";
+  page.style.boxShadow="none";
+  page.style.overflow="hidden";
   document.body.appendChild(page);
 
   try{
@@ -474,7 +483,9 @@ function V(t,e){const n=D(v[t]||[],Number(o.startPage)+t,Y(t));n.classList.add("
     if(!rect.width||!rect.height)throw new Error("페이지 크기를 계산하지 못했어요.");
     const canvas=await window.html2canvas(page,{
       scale:3,
-      backgroundColor:null,
+      // 투명 배경 대신 현재 문서에서 선택한 종이색을 사용한다.
+      // html2canvas가 가장자리의 반투명 픽셀을 합성할 때도 같은 색을 유지한다.
+      backgroundColor:o.paper,
       useCORS:true,
       allowTaint:false,
       logging:false,
